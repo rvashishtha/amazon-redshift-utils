@@ -42,6 +42,7 @@ import os
 import re
 import sys
 import traceback
+import socket
 from multiprocessing import Pool
 
 import boto3
@@ -177,6 +178,10 @@ def get_pg_conn():
         try:
             conn = pg8000.connect(user=db_user, host=db_host, port=db_port, database=db, password=db_pwd,
                                   ssl=ssl, timeout=None)
+            # Enable keepalives manually untill pg8000 supports it
+            # For future reference: https://github.com/mfenniak/pg8000/issues/149
+            # TCP keepalives still need to be configured appropriately on OS level as well
+            conn._usock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
         except Exception as e:
             print(e)
             print('Unable to connect to Cluster Endpoint')
@@ -504,7 +509,7 @@ def analyze(table_info):
                 if analyze_col_width and "character varying" in col_type:
                     curr_col_length = int(re.search(r'\d+', col_type).group())
                     if curr_col_length > 255:
-                        col_len_statement = 'select /* computing max column length */ max(len(%s)) from %s."%s"' % (
+                        col_len_statement = 'select /* computing max column length */ max(len("%s")) from %s."%s"' % (
                             descr[col][0], schema_name, table_name)
                         try:
                             if debug:
@@ -560,7 +565,7 @@ def analyze(table_info):
 
                 # check whether number columns are too wide
                 if analyze_col_width and "int" in col_type:
-                    col_len_statement = 'select max(%s) from %s."%s"' % (descr[col][0], schema_name, table_name)
+                    col_len_statement = 'select max("%s") from %s."%s"' % (descr[col][0], schema_name, table_name)
                     try:
                         if debug:
                             comment(col_len_statement)
@@ -757,6 +762,8 @@ def analyze(table_info):
                                                                             table_name)
                 if len(table_sortkeys) > 0:
                     insert = "%s order by %s;" % (insert, ",".join(table_sortkeys))
+                else:
+                    insert = "%s;" % (insert)
 
                 statements.extend([insert])
 
